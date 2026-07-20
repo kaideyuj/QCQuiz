@@ -457,8 +457,8 @@
       <h1>淡江品管班題庫</h1>
       <p id="status">載入題庫中…</p>
       <div class="version-box">
-        <div>HTML v5｜2026-07-21 02:30</div>
-        <div>Questions v3｜2026-07-21 00:38</div>
+        <div id="htmlVersion"></div>
+        <div id="questionsVersion"></div>
       </div>
     </section>
 
@@ -617,8 +617,8 @@
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v5";
-    const HTML_BUILD_TIME = "2026-07-21 02:30";
+    const HTML_VERSION = "v6";
+    const HTML_BUILD_TIME = "2026-07-21 03:57";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
     const DATA_FILE = "questions_v3.json";
@@ -637,6 +637,9 @@
     let activeUserCode = "";
 
     const $ = (id) => document.getElementById(id);
+
+    $("htmlVersion").textContent = `HTML ${HTML_VERSION}｜${HTML_BUILD_TIME}`;
+    $("questionsVersion").textContent = `Questions ${QUESTIONS_VERSION}｜${QUESTIONS_BUILD_TIME}`;
 
     // ============================================================
     // 通用工具
@@ -689,15 +692,88 @@
       };
     }
 
+    function nonNegativeInteger(value) {
+      return Number.isInteger(value) && value >= 0 ? value : 0;
+    }
+
+    function normalizeQuestionStats(questionStats) {
+      if (!questionStats || typeof questionStats !== "object" || Array.isArray(questionStats)) {
+        return {};
+      }
+
+      return Object.fromEntries(
+        Object.entries(questionStats).map(([questionId, stats]) => {
+          const safeStats = stats && typeof stats === "object" ? stats : {};
+
+          return [questionId, {
+            ...safeStats,
+            attempts: nonNegativeInteger(safeStats.attempts),
+            correct: nonNegativeInteger(safeStats.correct),
+            wrong: nonNegativeInteger(safeStats.wrong),
+            lastAnswer: safeStats.lastAnswer ?? null,
+            lastCorrect: safeStats.lastCorrect ?? null,
+            lastAt: safeStats.lastAt ?? null
+          }];
+        })
+      );
+    }
+
+    function normalizeProfile(code, profile) {
+      const safeProfile = profile && typeof profile === "object" ? profile : {};
+      const safeSummary = safeProfile.summary && typeof safeProfile.summary === "object"
+        ? safeProfile.summary
+        : {};
+      const safeProgress = safeProfile.sequentialProgress
+        && typeof safeProfile.sequentialProgress === "object"
+        ? safeProfile.sequentialProgress
+        : {};
+
+      return {
+        ...safeProfile,
+        code: typeof safeProfile.code === "string" ? safeProfile.code : code,
+        createdAt: safeProfile.createdAt ?? null,
+        updatedAt: safeProfile.updatedAt ?? null,
+        summary: {
+          ...safeSummary,
+          quizCount: nonNegativeInteger(safeSummary.quizCount),
+          answeredCount: nonNegativeInteger(safeSummary.answeredCount),
+          correctCount: nonNegativeInteger(safeSummary.correctCount),
+          wrongCount: nonNegativeInteger(safeSummary.wrongCount)
+        },
+        questionStats: normalizeQuestionStats(safeProfile.questionStats),
+        sessions: Array.isArray(safeProfile.sessions) ? safeProfile.sessions : [],
+        sequentialProgress: {
+          ...safeProgress,
+          questionId: Number.isInteger(Number(safeProgress.questionId))
+            ? Number(safeProgress.questionId)
+            : 1,
+          updatedAt: safeProgress.updatedAt ?? null
+        }
+      };
+    }
+
+    function normalizeStore(parsed) {
+      if (!parsed || typeof parsed !== "object" || !parsed.profiles
+        || typeof parsed.profiles !== "object" || Array.isArray(parsed.profiles)) {
+        return emptyStore();
+      }
+
+      return {
+        ...parsed,
+        profiles: Object.fromEntries(
+          Object.entries(parsed.profiles).map(([code, profile]) => [
+            code,
+            normalizeProfile(code, profile)
+          ])
+        )
+      };
+    }
+
     function loadStore() {
       try {
         const parsed = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || "null");
 
-        if (!parsed || typeof parsed !== "object" || !parsed.profiles) {
-          return emptyStore();
-        }
-
-        return parsed;
+        return normalizeStore(parsed);
       } catch (error) {
         return emptyStore();
       }
@@ -932,6 +1008,38 @@
     // ============================================================
     // 題庫載入與主選單
     // ============================================================
+    function validateQuestionBank(data) {
+      if (!Array.isArray(data) || !data.length) {
+        throw new Error("題庫不是有效的題目陣列。");
+      }
+
+      const ids = new Set();
+
+      data.forEach((question) => {
+        const isQuestionObject = question
+          && typeof question === "object"
+          && !Array.isArray(question);
+        const hasValidOptions = isQuestionObject && question.options
+          && typeof question.options === "object"
+          && !Array.isArray(question.options);
+        const optionKeys = hasValidOptions ? Object.keys(question.options) : [];
+        const hasValidChoiceOrder = isQuestionObject && Array.isArray(question.choice_order)
+          && question.choice_order.length === optionKeys.length
+          && question.choice_order.every((key) => optionKeys.includes(key));
+
+        if (!isQuestionObject || !Number.isInteger(question.id) || ids.has(question.id)
+          || typeof question.question !== "string" || !question.question.trim()
+          || !hasValidOptions || !optionKeys.length
+          || !optionKeys.includes(question.answer) || !hasValidChoiceOrder) {
+          throw new Error(`題庫第 ${question?.id ?? "未知"} 題格式錯誤。`);
+        }
+
+        ids.add(question.id);
+      });
+
+      return data;
+    }
+
     fetch(`${DATA_FILE}?v=${DATA_CACHE_KEY}`, { cache: "no-store" })
       .then((response) => {
         if (!response.ok) {
@@ -941,7 +1049,7 @@
         return response.json();
       })
       .then((data) => {
-        bank = data;
+        bank = validateQuestionBank(data);
         $("status").textContent = `完整題庫 ${bank.length.toLocaleString()} 題｜手機、iPad、電腦皆可使用`;
 
         [...new Set(bank.map((question) => question.unit))]
@@ -1147,10 +1255,6 @@
 
         const classes = ["option"];
 
-        if (!response && response?.selected === key) {
-          classes.push("selected");
-        }
-
         if (response) {
           classes.push("locked");
         }
@@ -1325,6 +1429,10 @@
 
       const session = buildSessionResult();
       const savedProfile = saveSessionForActiveUser(session);
+
+      if (quizContext?.sequential && activeUserCode) {
+        saveSequentialProgress(1);
+      }
 
       renderResult(session, savedProfile);
       show("result");
