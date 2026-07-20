@@ -294,9 +294,25 @@
 
     .nav {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-areas:
+        "previous next"
+        "home home";
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
       margin-top: 15px;
+    }
+
+    #prevBtn {
+      grid-area: previous;
+    }
+
+    #nextBtn,
+    #submitBtn {
+      grid-area: next;
+    }
+
+    #homeBtn {
+      grid-area: home;
     }
 
     .mode-card {
@@ -617,8 +633,8 @@
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v6";
-    const HTML_BUILD_TIME = "2026-07-21 03:57";
+    const HTML_VERSION = "v7";
+    const HTML_BUILD_TIME = "2026-07-21 04:19";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
     const DATA_FILE = "questions_v3.json";
@@ -1306,8 +1322,8 @@
         feedback.className = "feedback correct";
         feedback.textContent = `答對：${question.answer}．${question.options[question.answer]}`;
       } else {
-        feedback.className = "feedback wrong";
-        feedback.textContent = `答錯。正確答案：${question.answer}．${question.options[question.answer]}`;
+        feedback.className = "feedback hidden";
+        feedback.textContent = "";
       }
     }
 
