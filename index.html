@@ -294,9 +294,25 @@
 
     .nav {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 10px;
       margin-top: 15px;
+    }
+
+    .mode-card {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px;
+      margin: 14px 0;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+
+    .mode-card button {
+      flex: 0 0 auto;
     }
 
     .score {
@@ -422,6 +438,14 @@
       .lookup-row button {
         width: 100%;
       }
+
+      .mode-card {
+        display: grid;
+      }
+
+      .mode-card button {
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -433,7 +457,7 @@
       <h1>淡江品管班題庫</h1>
       <p id="status">載入題庫中…</p>
       <div class="version-box">
-        <div>HTML v4｜2026-07-21 02:13</div>
+        <div>HTML v5｜2026-07-21 02:30</div>
         <div>Questions v3｜2026-07-21 00:38</div>
       </div>
     </section>
@@ -460,6 +484,23 @@
       </div>
 
       <div id="profileInfo" class="profile-card"></div>
+
+      <div class="mode-card">
+        <div>
+          <strong>依序作答模式</strong>
+          <div id="sequentialHint" class="small">
+            未指定使用者時，將從原題號 1 開始，且不保存進度。
+          </div>
+        </div>
+        <button
+          id="sequentialBtn"
+          class="primary"
+          type="button"
+          onclick="startSequentialQuiz()"
+        >
+          從第 1 題開始
+        </button>
+      </div>
 
       <div class="field">
         <label for="unit">出題範圍</label>
@@ -526,6 +567,7 @@
 
       <div class="nav">
         <button id="prevBtn" class="secondary" type="button" onclick="move(-1)">上一題</button>
+        <button id="homeBtn" class="secondary" type="button" onclick="saveAndReturnHome()">回首頁</button>
         <button id="nextBtn" class="primary" type="button" onclick="move(1)">下一題</button>
         <button id="submitBtn" class="primary hidden" type="button" onclick="submitQuiz()">交卷</button>
       </div>
@@ -575,8 +617,8 @@
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v4";
-    const HTML_BUILD_TIME = "2026-07-21 02:13";
+    const HTML_VERSION = "v5";
+    const HTML_BUILD_TIME = "2026-07-21 02:30";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
     const DATA_FILE = "questions_v3.json";
@@ -679,7 +721,11 @@
           wrongCount: 0
         },
         questionStats: {},
-        sessions: []
+        sessions: [],
+        sequentialProgress: {
+          questionId: 1,
+          updatedAt: null
+        }
       };
     }
 
@@ -738,6 +784,7 @@
       if (!profile) {
         box.innerHTML = "<strong>訪客模式</strong><div class=\"small\">本次作答不會寫入瀏覽器紀錄。</div>";
         clearButton.classList.add("hidden");
+        updateSequentialModeInfo();
         updateHistory();
         return;
       }
@@ -745,16 +792,83 @@
       const summary = profile.summary;
       const accuracy = percent(summary.correctCount, summary.answeredCount);
 
+      const sequentialQuestionId = getSequentialProgressQuestionId(profile);
+
       box.innerHTML = `
         <strong>目前代號：${escapeHtml(profile.code)}</strong>
         <div class="small">
           完成 ${summary.quizCount} 次測驗｜作答 ${summary.answeredCount} 題｜
           正確 ${summary.correctCount} 題｜錯誤 ${summary.wrongCount} 題｜正確率 ${accuracy}
         </div>
+        <div class="small">
+          依序作答進度：下次從原題號 ${sequentialQuestionId} 開始。
+        </div>
       `;
 
       clearButton.classList.remove("hidden");
+      updateSequentialModeInfo();
       updateHistory();
+    }
+
+    function getSequentialProgressQuestionId(profile) {
+      const candidate = Number(profile?.sequentialProgress?.questionId);
+
+      if (Number.isInteger(candidate) && bank.some((question) => question.id === candidate)) {
+        return candidate;
+      }
+
+      return 1;
+    }
+
+    function updateSequentialModeInfo() {
+      const hint = $("sequentialHint");
+      const button = $("sequentialBtn");
+
+      if (!hint || !button) {
+        return;
+      }
+
+      const profile = getActiveProfile();
+
+      if (!profile) {
+        hint.textContent = "未指定使用者時，將從原題號 1 開始，且不保存進度。";
+        button.textContent = "從第 1 題開始";
+        return;
+      }
+
+      const questionId = getSequentialProgressQuestionId(profile);
+      hint.textContent = `代號「${profile.code}」已保存進度，下次從原題號 ${questionId} 開始。`;
+      button.textContent = questionId === 1
+        ? "從第 1 題開始"
+        : `從第 ${questionId} 題續答`;
+    }
+
+    function saveSequentialProgress(questionId, refreshHome = false) {
+      if (!activeUserCode || !quizContext?.sequential) {
+        return;
+      }
+
+      const validQuestionId = Number(questionId);
+
+      if (!bank.some((question) => question.id === validQuestionId)) {
+        return;
+      }
+
+      const store = loadStore();
+      const profile = store.profiles[activeUserCode] || createProfile(activeUserCode);
+      const timestamp = nowIso();
+
+      profile.sequentialProgress = {
+        questionId: validQuestionId,
+        updatedAt: timestamp
+      };
+      profile.updatedAt = timestamp;
+      store.profiles[activeUserCode] = profile;
+      saveStore(store);
+
+      if (refreshHome) {
+        updateProfileInfo();
+      }
     }
 
     function updateHistory() {
@@ -859,6 +973,44 @@
       return Math.max(1, Math.min(requested, poolLength));
     }
 
+    function startSequentialQuiz() {
+      if (!bank.length) {
+        return;
+      }
+
+      applyUserCode();
+
+      const profile = getActiveProfile();
+      const startQuestionId = profile
+        ? getSequentialProgressQuestionId(profile)
+        : 1;
+
+      qs = bank
+        .filter((question) => question.id >= startQuestionId)
+        .sort((a, b) => a.id - b.id);
+
+      if (!qs.length) {
+        window.alert("找不到可接續的題目，將從第 1 題重新開始。");
+        qs = [...bank].sort((a, b) => a.id - b.id);
+      }
+
+      responses = {};
+      idx = 0;
+      quizContext = {
+        startedAt: nowIso(),
+        unit: "全部單元",
+        mode: "依序作答",
+        requestedCount: qs.length,
+        userCode: activeUserCode,
+        sequential: true,
+        sequentialStartId: qs[0]?.id || 1
+      };
+
+      show("quiz");
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
     function startQuiz(wrongOnly) {
       if (!bank.length) {
         return;
@@ -910,7 +1062,8 @@
         unit: selectedUnit || "全部單元",
         mode: wrongOnly ? "錯題練習" : "隨機測驗",
         requestedCount: count,
-        userCode: activeUserCode
+        userCode: activeUserCode,
+        sequential: false
       };
 
       show("quiz");
@@ -941,7 +1094,8 @@
         unit: question.unit,
         mode: "指定題號",
         requestedCount: 1,
-        userCode: activeUserCode
+        userCode: activeUserCode,
+        sequential: false
       };
 
       show("quiz");
@@ -970,9 +1124,15 @@
       const question = qs[idx];
       const response = responses[question.id] || null;
 
-      $("pos").textContent = `第 ${idx + 1} / ${qs.length} 題`;
+      if (quizContext?.sequential) {
+        $("pos").textContent = `依序作答｜原題號 ${question.id} / ${bank.length}`;
+        $("bar").style.width = `${(question.id / bank.length) * 100}%`;
+      } else {
+        $("pos").textContent = `第 ${idx + 1} / ${qs.length} 題`;
+        $("bar").style.width = `${((idx + 1) / qs.length) * 100}%`;
+      }
+
       $("meta").textContent = `原題號 ${question.id}｜PDF 第 ${question.page} 頁`;
-      $("bar").style.width = `${((idx + 1) / qs.length) * 100}%`;
       $("qtext").textContent = question.question;
 
       const optionsBox = $("opts");
@@ -1023,6 +1183,10 @@
 
       renderFeedback(question, response);
       renderNavigation();
+
+      if (quizContext?.sequential) {
+        saveSequentialProgress(question.id);
+      }
     }
 
     function renderFeedback(question, response) {
@@ -1261,6 +1425,16 @@
 
         body.appendChild(row);
       });
+    }
+
+    function saveAndReturnHome() {
+      const currentQuestion = qs[idx];
+
+      if (quizContext?.sequential && currentQuestion) {
+        saveSequentialProgress(currentQuestion.id);
+      }
+
+      returnHome();
     }
 
     function returnHome() {
