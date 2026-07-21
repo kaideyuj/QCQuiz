@@ -55,6 +55,15 @@ class RepositoryTests(unittest.TestCase):
     def test_storage_keys_remain_v4_compatible(self):
         self.assertIn('const PROFILE_STORAGE_KEY = "qcQuizProfilesV4";', self.index)
         self.assertIn('const ACTIVE_USER_KEY = "qcQuizActiveUserV4";', self.index)
+
+    def test_clear_all_profiles_is_scoped_and_password_protected(self):
+        self.assertIn('const CLEAR_ALL_PASSWORD = "1234";', self.index)
+        self.assertIn('id="clearAllPassword"', self.index)
+        self.assertIn('type="password"', self.index)
+        self.assertIn("function confirmClearAllRecords()", self.index)
+        self.assertIn("localStorage.removeItem(PROFILE_STORAGE_KEY);", self.index)
+        self.assertIn("localStorage.removeItem(ACTIVE_USER_KEY);", self.index)
+        self.assertNotIn("localStorage.clear()", self.index)
         self.assertIn("function normalizeStore(parsed)", self.index)
 
     def test_versions_are_rendered_from_constants(self):
@@ -76,11 +85,14 @@ class RepositoryTests(unittest.TestCase):
         self.assertIsNone(re.search(r"<style>.*</style>", self.index))
         self.assertIsNone(re.search(r"<script>.*</script>", self.index))
 
-    def test_quiz_navigation_and_wrong_feedback_layout(self):
+    def test_quiz_navigation_and_feedback_layout(self):
         self.assertIn('"previous next"', self.index)
         self.assertIn('"home home"', self.index)
         self.assertIn("#nextBtn,\n    #submitBtn", self.index)
         self.assertNotIn("答錯。正確答案：", self.index)
+        self.assertNotIn("答對：", self.index)
+        self.assertNotIn('id="feedback"', self.index)
+        self.assertNotIn("renderFeedback", self.index)
 
 
 if __name__ == "__main__":
