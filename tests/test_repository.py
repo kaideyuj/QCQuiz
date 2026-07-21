@@ -76,6 +76,12 @@ class RepositoryTests(unittest.TestCase):
         self.assertIsNone(re.search(r"<style>.*</style>", self.index))
         self.assertIsNone(re.search(r"<script>.*</script>", self.index))
 
+    def test_quiz_navigation_and_wrong_feedback_layout(self):
+        self.assertIn('"previous next"', self.index)
+        self.assertIn('"home home"', self.index)
+        self.assertIn("#nextBtn,\n    #submitBtn", self.index)
+        self.assertNotIn("答錯。正確答案：", self.index)
+
 
 if __name__ == "__main__":
     unittest.main()
