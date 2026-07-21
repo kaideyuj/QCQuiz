@@ -692,8 +692,8 @@
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v8";
-    const HTML_BUILD_TIME = "2026-07-21 09:56";
+    const HTML_VERSION = "v9";
+    const HTML_BUILD_TIME = "2026-07-21 10:24";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
     const DATA_FILE = "questions_v3.json";
@@ -1338,20 +1338,43 @@
     }
 
     // ============================================================
-    // 答題與即時判定
+    // 答題與確認判定
     // ============================================================
-    function answerQuestion(question, selectedKey) {
-      if (responses[question.id]) {
+    function selectAnswer(question, selectedKey) {
+      const response = responses[question.id];
+
+      if (response?.confirmed) {
         return;
       }
 
       responses[question.id] = {
         selected: selectedKey,
-        isCorrect: selectedKey === question.answer,
-        answeredAt: nowIso()
+        confirmed: false,
+        isCorrect: null,
+        answeredAt: null
       };
 
       render();
+    }
+
+    function confirmCurrentAnswer() {
+      const question = qs[idx];
+      const response = responses[question.id];
+
+      if (!response?.selected) {
+        window.alert("請先選擇答案。");
+        return false;
+      }
+
+      if (!response.confirmed) {
+        response.confirmed = true;
+        response.isCorrect = response.selected === question.answer;
+        response.answeredAt = nowIso();
+        render();
+        return false;
+      }
+
+      return true;
     }
 
     function render() {
@@ -1374,14 +1397,20 @@
 
       question.choice_order.forEach((key) => {
         const label = document.createElement("label");
-        const isCorrectOption = response && key === question.answer;
-        const isSelectedWrong = response
+        const isConfirmed = response?.confirmed === true;
+        const isSelected = response?.selected === key;
+        const isCorrectOption = isConfirmed && key === question.answer;
+        const isSelectedWrong = isConfirmed
           && key === response.selected
           && response.selected !== question.answer;
 
         const classes = ["option"];
 
-        if (response) {
+        if (isSelected && !isConfirmed) {
+          classes.push("selected");
+        }
+
+        if (isConfirmed) {
           classes.push("locked");
         }
 
@@ -1399,13 +1428,13 @@
             type="radio"
             name="opt"
             ${response?.selected === key ? "checked" : ""}
-            ${response ? "disabled" : ""}
+            ${isConfirmed ? "disabled" : ""}
           >
           <span><b>${key}.</b> ${escapeHtml(question.options[key])}</span>
         `;
 
-        label.addEventListener("click", () => {
-          answerQuestion(question, key);
+        label.querySelector("input").addEventListener("change", () => {
+          selectAnswer(question, key);
         });
 
         optionsBox.appendChild(label);
@@ -1421,13 +1450,21 @@
     function renderNavigation() {
       const isFirstQuestion = idx === 0;
       const isLastQuestion = idx === qs.length - 1;
+      const response = responses[qs[idx].id] || null;
+      const hasPendingAnswer = response?.selected && !response.confirmed;
 
       $("prevBtn").disabled = isFirstQuestion;
+      $("nextBtn").textContent = hasPendingAnswer ? "提送" : "下一題";
+      $("submitBtn").textContent = hasPendingAnswer ? "提送" : "交卷";
       $("nextBtn").classList.toggle("hidden", isLastQuestion);
       $("submitBtn").classList.toggle("hidden", !isLastQuestion);
     }
 
     function move(direction) {
+      if (direction > 0 && !confirmCurrentAnswer()) {
+        return;
+      }
+
       idx = Math.max(0, Math.min(qs.length - 1, idx + direction));
       render();
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1438,7 +1475,8 @@
     // ============================================================
     function buildSessionResult() {
       const details = qs.map((question) => {
-        const response = responses[question.id] || null;
+        const savedResponse = responses[question.id] || null;
+        const response = savedResponse?.confirmed ? savedResponse : null;
 
         return {
           id: question.id,
@@ -1522,7 +1560,16 @@
     }
 
     function submitQuiz() {
-      const unansweredCount = qs.filter((question) => !responses[question.id]).length;
+      const currentResponse = responses[qs[idx].id] || null;
+
+      if (currentResponse && !currentResponse.confirmed) {
+        confirmCurrentAnswer();
+        return;
+      }
+
+      const unansweredCount = qs.filter(
+        (question) => !responses[question.id]?.confirmed
+      ).length;
 
       if (unansweredCount > 0) {
         const confirmed = window.confirm(

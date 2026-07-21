@@ -94,6 +94,15 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn('id="feedback"', self.index)
         self.assertNotIn("renderFeedback", self.index)
 
+    def test_answers_are_graded_only_after_confirmation(self):
+        self.assertIn("function selectAnswer(question, selectedKey)", self.index)
+        self.assertIn("function confirmCurrentAnswer()", self.index)
+        self.assertIn("confirmed: false", self.index)
+        self.assertIn("response.confirmed = true;", self.index)
+        self.assertIn('hasPendingAnswer ? "提送" : "下一題"', self.index)
+        self.assertIn('hasPendingAnswer ? "提送" : "交卷"', self.index)
+        self.assertNotIn("function answerQuestion(question, selectedKey)", self.index)
+
 
 if __name__ == "__main__":
     unittest.main()
