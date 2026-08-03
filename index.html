@@ -1460,6 +1460,7 @@
       responses = {};
       idx = 0;
       quizContext = {
+        sessionId: `sequential-${Date.now()}`,
         startedAt: nowIso(),
         unit: "全部單元",
         mode: "依序作答",
@@ -1603,6 +1604,7 @@
         response.confirmed = true;
         response.isCorrect = response.selected === question.answer;
         response.answeredAt = nowIso();
+        saveSequentialAnswer(question, response);
         render();
         return false;
       }
@@ -1707,6 +1709,82 @@
     // ============================================================
     // 交卷、保存與統計
     // ============================================================
+    function saveSequentialAnswer(question, response) {
+      if (!activeUserCode || !quizContext?.sequential || !response?.confirmed) {
+        return null;
+      }
+
+      const store = loadStore();
+      const profile = store.profiles[activeUserCode] || createProfile(activeUserCode);
+      const timestamp = response.answeredAt || nowIso();
+      const sessionId = quizContext.sessionId || `sequential-${Date.now()}`;
+      let session = profile.sessions.find((item) => item.id === sessionId);
+
+      if (!session) {
+        session = {
+          id: sessionId,
+          startedAt: quizContext.startedAt || timestamp,
+          completedAt: timestamp,
+          unit: quizContext.unit || "全部單元",
+          mode: "依序作答",
+          questionCount: 0,
+          answeredCount: 0,
+          correctCount: 0,
+          wrongCount: 0,
+          unansweredCount: 0,
+          score: 0,
+          details: []
+        };
+        profile.sessions.push(session);
+        profile.summary.quizCount += 1;
+      }
+
+      if (session.details.some((detail) => Number(detail.id) === question.id)) {
+        return profile;
+      }
+
+      const detail = {
+        id: question.id,
+        selected: response.selected,
+        answer: question.answer,
+        isCorrect: response.isCorrect
+      };
+      session.details.push(detail);
+      session.questionCount = session.details.length;
+      session.answeredCount = session.details.length;
+      session.correctCount = session.details.filter((item) => item.isCorrect === true).length;
+      session.wrongCount = session.details.filter((item) => item.isCorrect === false).length;
+      session.unansweredCount = 0;
+      session.score = Math.round((session.correctCount / session.answeredCount) * 100);
+      session.completedAt = timestamp;
+
+      const key = String(question.id);
+      const stats = profile.questionStats[key] || {
+        attempts: 0,
+        correct: 0,
+        wrong: 0,
+        lastAnswer: null,
+        lastCorrect: null,
+        lastAt: null
+      };
+      stats.attempts += 1;
+      stats.correct += response.isCorrect ? 1 : 0;
+      stats.wrong += response.isCorrect ? 0 : 1;
+      stats.lastAnswer = response.selected;
+      stats.lastCorrect = response.isCorrect;
+      stats.lastAt = timestamp;
+      profile.questionStats[key] = stats;
+
+      profile.summary.answeredCount += 1;
+      profile.summary.correctCount += response.isCorrect ? 1 : 0;
+      profile.summary.wrongCount += response.isCorrect ? 0 : 1;
+      profile.updatedAt = timestamp;
+      profile.sessions = profile.sessions.slice(-MAX_SESSION_HISTORY);
+      store.profiles[activeUserCode] = profile;
+      saveStore(store);
+      return profile;
+    }
+
     function buildSessionResult() {
       const details = qs.map((question) => {
         const savedResponse = responses[question.id] || null;
@@ -1815,11 +1893,18 @@
         }
       }
 
-      const session = buildSessionResult();
-      const savedProfile = saveSessionForActiveUser(session);
+      let session;
+      let savedProfile;
 
       if (quizContext?.sequential && activeUserCode) {
+        savedProfile = getActiveProfile();
+        session = savedProfile?.sessions.find(
+          (item) => item.id === quizContext.sessionId
+        ) || buildSessionResult();
         saveSequentialProgress(1);
+      } else {
+        session = buildSessionResult();
+        savedProfile = saveSessionForActiveUser(session);
       }
 
       renderResult(session, savedProfile);

@@ -81,6 +81,13 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("function buildWorkbook(inputSheets)", self.xlsx_export)
         self.assertIn("application/vnd.openxmlformats-officedocument", self.xlsx_export)
 
+    def test_sequential_answers_are_saved_into_records(self):
+        self.assertIn("function saveSequentialAnswer(question, response)", self.index)
+        self.assertIn("saveSequentialAnswer(question, response);", self.index)
+        self.assertIn('sessionId: `sequential-${Date.now()}`', self.index)
+        self.assertIn('mode: "依序作答"', self.index)
+        self.assertIn("profile.summary.answeredCount += 1;", self.index)
+
     def test_clear_all_profiles_is_scoped_and_password_protected(self):
         self.assertIn('const CLEAR_ALL_PASSWORD = "1234";', self.index)
         self.assertIn('id="clearAllPassword"', self.index)
