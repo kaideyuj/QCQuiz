@@ -778,7 +778,7 @@
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v12";
+    const HTML_VERSION = "v13";
     const HTML_BUILD_TIME = "2026-08-03";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
@@ -1255,6 +1255,54 @@
       }
     }
 
+    function restoreSequentialHistory(profile, beforeQuestionId) {
+      if (!profile || beforeQuestionId <= 1) {
+        return {};
+      }
+
+      const history = {};
+      const sequentialSessions = profile.sessions.filter(
+        (session) => session?.mode === "依序作答" && Array.isArray(session.details)
+      );
+
+      sequentialSessions.forEach((session) => {
+        session.details.forEach((detail) => {
+          const questionId = Number(detail?.id);
+
+          if (!Number.isInteger(questionId) || questionId >= beforeQuestionId || !detail.selected) {
+            return;
+          }
+
+          history[questionId] = {
+            selected: detail.selected,
+            confirmed: true,
+            isCorrect: detail.isCorrect,
+            answeredAt: session.completedAt || null,
+            historical: true
+          };
+        });
+      });
+
+      Object.entries(profile.questionStats || {}).forEach(([questionIdText, stats]) => {
+        const questionId = Number(questionIdText);
+
+        if (history[questionId] || !Number.isInteger(questionId)
+          || questionId >= beforeQuestionId || !stats?.lastAnswer) {
+          return;
+        }
+
+        history[questionId] = {
+          selected: stats.lastAnswer,
+          confirmed: true,
+          isCorrect: stats.lastCorrect,
+          answeredAt: stats.lastAt,
+          historical: true
+        };
+      });
+
+      return history;
+    }
+
     function updateHistory() {
       const profile = getActiveProfile();
 
@@ -1465,17 +1513,13 @@
         ? getSequentialProgressQuestionId(profile)
         : 1;
 
-      qs = bank
-        .filter((question) => question.id >= startQuestionId)
-        .sort((a, b) => a.id - b.id);
+      qs = [...bank].sort((a, b) => a.id - b.id);
+      responses = restoreSequentialHistory(profile, startQuestionId);
+      idx = qs.findIndex((question) => question.id === startQuestionId);
 
-      if (!qs.length) {
-        window.alert("找不到可接續的題目，將從第 1 題重新開始。");
-        qs = [...bank].sort((a, b) => a.id - b.id);
+      if (idx < 0) {
+        idx = 0;
       }
-
-      responses = {};
-      idx = 0;
       quizContext = {
         sessionId: `sequential-${Date.now()}`,
         startedAt: nowIso(),
@@ -1484,7 +1528,8 @@
         requestedCount: qs.length,
         userCode: activeUserCode,
         sequential: true,
-        sequentialStartId: qs[0]?.id || 1
+        sequentialStartId: startQuestionId,
+        sequentialProgressId: startQuestionId
       };
 
       show("quiz");
@@ -1678,6 +1723,16 @@
         response.isCorrect = response.selected === question.answer;
         response.answeredAt = nowIso();
         saveSequentialAnswer(question, response);
+
+        if (quizContext?.sequential) {
+          const nextQuestionId = qs[idx + 1]?.id || question.id;
+          quizContext.sequentialProgressId = Math.max(
+            quizContext.sequentialProgressId || 1,
+            nextQuestionId
+          );
+          saveSequentialProgress(quizContext.sequentialProgressId);
+        }
+
         render();
         return false;
       }
@@ -1750,10 +1805,6 @@
       });
 
       renderNavigation();
-
-      if (quizContext?.sequential) {
-        saveSequentialProgress(question.id);
-      }
     }
 
     function renderNavigation() {
@@ -2225,7 +2276,9 @@
       const currentQuestion = qs[idx];
 
       if (quizContext?.sequential && currentQuestion) {
-        saveSequentialProgress(currentQuestion.id);
+        saveSequentialProgress(
+          quizContext.sequentialProgressId || currentQuestion.id
+        );
       }
 
       returnHome();

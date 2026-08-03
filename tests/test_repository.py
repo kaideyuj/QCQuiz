@@ -88,6 +88,22 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('mode: "依序作答"', self.index)
         self.assertIn("profile.summary.answeredCount += 1;", self.index)
 
+    def test_synced_sequential_progress_can_review_previous_answers(self):
+        self.assertIn(
+            "function restoreSequentialHistory(profile, beforeQuestionId)",
+            self.index
+        )
+        self.assertIn("responses = restoreSequentialHistory", self.index)
+        self.assertIn("qs = [...bank].sort", self.index)
+        self.assertIn("idx = qs.findIndex", self.index)
+        self.assertIn("historical: true", self.index)
+        self.assertIn("sequentialProgressId: startQuestionId", self.index)
+        self.assertIn(
+            "quizContext.sequentialProgressId || currentQuestion.id",
+            self.index
+        )
+        self.assertNotIn("saveSequentialProgress(question.id);", self.index)
+
     def test_current_question_and_options_can_be_copied(self):
         self.assertIn('id="copyQuestionBtn"', self.index)
         self.assertIn("function copyCurrentQuestion()", self.index)
