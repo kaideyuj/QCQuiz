@@ -77,7 +77,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('src="xlsx-export.js"', self.index)
         self.assertIn('name: "測驗紀錄"', self.index)
         self.assertIn('name: "作答明細"', self.index)
-        self.assertIn('["使用者", "完成時間", "模式"', self.index)
+        self.assertIn('["使用者", "完成／更新時間", "模式"', self.index)
         self.assertIn("function buildWorkbook(inputSheets)", self.xlsx_export)
         self.assertIn("application/vnd.openxmlformats-officedocument", self.xlsx_export)
 

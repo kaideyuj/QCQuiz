@@ -690,7 +690,7 @@
           <table>
             <thead>
               <tr>
-                <th>完成時間</th>
+                <th>完成／更新時間</th>
                 <th>模式</th>
                 <th>範圍</th>
                 <th>題數</th>
@@ -710,7 +710,7 @@
           <table>
             <thead>
               <tr>
-                <th>完成時間</th>
+                <th>完成／更新時間</th>
                 <th>模式</th>
                 <th>題號</th>
                 <th>PDF頁</th>
@@ -1164,7 +1164,7 @@
         <strong>目前代號：${escapeHtml(profile.code)}</strong>
         ${isCloudUser(profile.code) ? '<div class="small text-ok">雲端同步已啟用</div>' : ""}
         <div class="small">
-          完成 ${summary.quizCount} 次測驗｜作答 ${summary.answeredCount} 題｜
+          保存 ${summary.quizCount} 筆測驗紀錄｜作答 ${summary.answeredCount} 題｜
           正確 ${summary.correctCount} 題｜錯誤 ${summary.wrongCount} 題｜正確率 ${accuracy}
         </div>
         <div class="small">
@@ -1948,7 +1948,7 @@
       container.innerHTML = `
         <div class="summary-card">
           <span class="number">${summary.quizCount}</span>
-          <span class="small">完成測驗</span>
+          <span class="small">測驗紀錄</span>
         </div>
         <div class="summary-card">
           <span class="number">${summary.answeredCount}</span>
@@ -2136,12 +2136,12 @@
         [
           {
             name: "測驗紀錄",
-            headers: ["使用者", "完成時間", "模式", "範圍", "題數", "已作答", "正確", "錯誤", "未作答", "分數"],
+            headers: ["使用者", "完成／更新時間", "模式", "範圍", "題數", "已作答", "正確", "錯誤", "未作答", "分數"],
             rows: sessionRows.map((row) => [profile.code, ...row])
           },
           {
             name: "作答明細",
-            headers: ["使用者", "完成時間", "模式", "題號", "PDF頁", "題目", "作答", "正確答案", "結果"],
+            headers: ["使用者", "完成／更新時間", "模式", "題號", "PDF頁", "題目", "作答", "正確答案", "結果"],
             rows: detailRows.map((row) => [profile.code, ...row])
           }
         ]
