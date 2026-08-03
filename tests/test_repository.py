@@ -108,6 +108,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('id="copyQuestionBtn"', self.index)
         self.assertIn("function copyCurrentQuestion()", self.index)
         self.assertIn("function currentQuestionCopyText(question)", self.index)
+        self.assertIn("`出題範圍：${question.unit}\\n原題號", self.index)
         self.assertIn("navigator.clipboard.writeText(text)", self.index)
         self.assertIn("fallbackCopyText(text)", self.index)
 
@@ -149,7 +150,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn('id="feedback"', self.index)
         self.assertNotIn("renderFeedback", self.index)
         self.assertIn('const quizUserLabel = quizContext?.userCode || "訪客";', self.index)
-        self.assertIn('`使用者：${quizUserLabel}｜原題號', self.index)
+        self.assertIn("出題範圍：${question.unit}", self.index)
+        self.assertIn(
+            '`使用者：${quizUserLabel}｜出題範圍：${question.unit}｜原題號',
+            self.index
+        )
 
     def test_answers_are_graded_only_after_confirmation(self):
         self.assertIn("function selectAnswer(question, selectedKey)", self.index)
