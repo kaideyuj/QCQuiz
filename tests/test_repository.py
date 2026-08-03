@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "index.html"
 QUESTIONS_PATH = ROOT / "questions_v3.json"
+XLSX_EXPORT_PATH = ROOT / "xlsx-export.js"
 
 
 class RepositoryTests(unittest.TestCase):
@@ -14,6 +15,7 @@ class RepositoryTests(unittest.TestCase):
     def setUpClass(cls):
         cls.index = INDEX_PATH.read_text(encoding="utf-8")
         cls.questions = json.loads(QUESTIONS_PATH.read_text(encoding="utf-8-sig"))
+        cls.xlsx_export = XLSX_EXPORT_PATH.read_text(encoding="utf-8")
 
     def test_formal_question_bank_is_valid(self):
         self.assertEqual(len(self.questions), 2648)
@@ -67,6 +69,17 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn("GITHUB_TOKEN", self.index)
         self.assertIn("是否將目前代號", self.index)
         self.assertIn("migratedFrom: previousCode", self.index)
+
+    def test_records_view_and_excel_export_are_available(self):
+        self.assertIn('id="records"', self.index)
+        self.assertIn('onclick="openRecords()"', self.index)
+        self.assertIn('onclick="exportRecordsToExcel()"', self.index)
+        self.assertIn('src="xlsx-export.js"', self.index)
+        self.assertIn('name: "測驗紀錄"', self.index)
+        self.assertIn('name: "作答明細"', self.index)
+        self.assertIn('["使用者", "完成時間", "模式"', self.index)
+        self.assertIn("function buildWorkbook(inputSheets)", self.xlsx_export)
+        self.assertIn("application/vnd.openxmlformats-officedocument", self.xlsx_export)
 
     def test_clear_all_profiles_is_scoped_and_password_protected(self):
         self.assertIn('const CLEAR_ALL_PASSWORD = "1234";', self.index)

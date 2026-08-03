@@ -594,6 +594,7 @@
       <div class="row stack">
         <button class="primary grow" type="button" onclick="startQuiz(false)">隨機出題</button>
         <button class="secondary" type="button" onclick="startQuiz(true)">只考錯題</button>
+        <button class="secondary" type="button" onclick="openRecords()">檢視作答紀錄</button>
         <button id="clearProfileBtn" class="danger hidden" type="button" onclick="clearCurrentProfile()">刪除此代號紀錄</button>
       </div>
 
@@ -664,6 +665,67 @@
 
       <div class="row stack" style="margin-top: 16px;">
         <button class="primary grow" type="button" onclick="startQuiz(false)">重新測驗</button>
+        <button class="secondary" type="button" onclick="openRecords()">檢視作答紀錄</button>
+        <button class="secondary" type="button" onclick="returnHome()">回首頁</button>
+      </div>
+    </section>
+
+    <!-- 作答紀錄區 -->
+    <section id="records" class="panel hidden">
+      <div class="row-between">
+        <div>
+          <h2>所有作答紀錄</h2>
+          <div id="recordsUser" class="small"></div>
+        </div>
+        <button id="exportRecordsBtn" class="primary" type="button" onclick="exportRecordsToExcel()">
+          匯出 Excel
+        </button>
+      </div>
+
+      <div id="recordsEmpty" class="profile-card hidden"></div>
+
+      <div id="recordsContent">
+        <h3>測驗紀錄</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>完成時間</th>
+                <th>模式</th>
+                <th>範圍</th>
+                <th>題數</th>
+                <th>已作答</th>
+                <th>正確</th>
+                <th>錯誤</th>
+                <th>未作答</th>
+                <th>分數</th>
+              </tr>
+            </thead>
+            <tbody id="recordsSessionBody"></tbody>
+          </table>
+        </div>
+
+        <h3>各題作答明細</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>完成時間</th>
+                <th>模式</th>
+                <th>題號</th>
+                <th>PDF頁</th>
+                <th>題目</th>
+                <th>作答</th>
+                <th>正確答案</th>
+                <th>結果</th>
+              </tr>
+            </thead>
+            <tbody id="recordsDetailBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="row stack" style="margin-top: 16px;">
         <button class="secondary" type="button" onclick="returnHome()">回首頁</button>
       </div>
     </section>
@@ -694,11 +756,12 @@
     </form>
   </dialog>
 
+  <script src="xlsx-export.js"></script>
   <script>
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v10";
+    const HTML_VERSION = "v11";
     const HTML_BUILD_TIME = "2026-08-03";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
@@ -744,7 +807,7 @@
     }
 
     function show(sectionId) {
-      ["home", "quiz", "result"].forEach((id) => {
+      ["home", "quiz", "result", "records"].forEach((id) => {
         $(id).classList.toggle("hidden", id !== sectionId);
       });
     }
@@ -1858,6 +1921,146 @@
 
         body.appendChild(row);
       });
+    }
+
+    function formatRecordDate(value) {
+      const date = value instanceof Date ? value : new Date(value);
+      return Number.isNaN(date.getTime())
+        ? "—"
+        : date.toLocaleString("zh-TW", { hour12: false });
+    }
+
+    function recordDate(value) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function buildRecordData(profile) {
+      const questionMap = new Map(bank.map((question) => [question.id, question]));
+      const sessions = [...profile.sessions].reverse();
+      const sessionRows = sessions.map((session) => [
+        recordDate(session.completedAt),
+        session.mode || "—",
+        session.unit || "—",
+        Number(session.questionCount) || 0,
+        Number(session.answeredCount) || 0,
+        Number(session.correctCount) || 0,
+        Number(session.wrongCount) || 0,
+        Number(session.unansweredCount) || 0,
+        Number(session.score) || 0
+      ]);
+      const detailRows = [];
+
+      sessions.forEach((session) => {
+        const completedAt = recordDate(session.completedAt);
+        const details = Array.isArray(session.details) ? session.details : [];
+
+        details.forEach((detail) => {
+          const question = questionMap.get(Number(detail.id));
+          const selectedText = detail.selected
+            ? `${detail.selected}．${question?.options?.[detail.selected] || ""}`
+            : "未作答";
+          const correctText = detail.answer
+            ? `${detail.answer}．${question?.options?.[detail.answer] || ""}`
+            : "—";
+          const resultText = detail.isCorrect === true
+            ? "正確"
+            : detail.isCorrect === false
+              ? "錯誤"
+              : "未作答";
+
+          detailRows.push([
+            completedAt,
+            session.mode || "—",
+            Number(detail.id) || 0,
+            question?.page ?? "—",
+            question?.question || "—",
+            selectedText,
+            correctText,
+            resultText
+          ]);
+        });
+      });
+
+      return { sessionRows, detailRows };
+    }
+
+    async function openRecords() {
+      if (await applyUserCode() === false) {
+        return;
+      }
+
+      const profile = getActiveProfile();
+      if (!profile) {
+        window.alert("請先輸入並載入使用者代號，才能檢視作答紀錄。");
+        return;
+      }
+
+      const { sessionRows, detailRows } = buildRecordData(profile);
+      const hasRecords = sessionRows.length > 0;
+      $("recordsUser").textContent = [
+        `使用者：${profile.code}`,
+        `目前保存 ${sessionRows.length} 次測驗（最多 ${MAX_SESSION_HISTORY} 次）`,
+        `共 ${detailRows.length} 筆題目明細`
+      ].join("｜");
+      $("recordsEmpty").textContent = `代號「${profile.code}」目前沒有已完成的測驗紀錄。`;
+      $("recordsEmpty").classList.toggle("hidden", hasRecords);
+      $("recordsContent").classList.toggle("hidden", !hasRecords);
+      $("exportRecordsBtn").classList.toggle("hidden", !hasRecords);
+
+      $("recordsSessionBody").innerHTML = sessionRows.map((row) => `
+        <tr>
+          ${row.map((value, index) => `<td${index === 8 ? ' class="text-ok"' : ""}>${escapeHtml(index === 0 ? formatRecordDate(value) : value)}</td>`).join("")}
+        </tr>
+      `).join("");
+
+      $("recordsDetailBody").innerHTML = detailRows.map((row) => {
+        const resultClass = row[7] === "正確" ? "text-ok" : row[7] === "錯誤" ? "text-bad" : "";
+        return `
+          <tr>
+            ${row.map((value, index) => `<td${index === 7 && resultClass ? ` class="${resultClass}"` : ""}>${escapeHtml(index === 0 ? formatRecordDate(value) : value)}</td>`).join("")}
+          </tr>
+        `;
+      }).join("");
+
+      show("records");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function exportRecordsToExcel() {
+      const profile = getActiveProfile();
+      if (!profile) {
+        window.alert("找不到目前使用者的作答紀錄。");
+        return;
+      }
+
+      const { sessionRows, detailRows } = buildRecordData(profile);
+      if (!sessionRows.length) {
+        window.alert("目前沒有可匯出的作答紀錄。");
+        return;
+      }
+      if (!window.QCQuizExcel?.downloadWorkbook) {
+        window.alert("Excel 匯出元件載入失敗，請重新整理後再試。");
+        return;
+      }
+
+      const safeCode = profile.code.replace(/[^\p{L}\p{N}._-]+/gu, "-");
+      const dateText = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+      window.QCQuizExcel.downloadWorkbook(
+        `QCQuiz-${safeCode}-${dateText}.xlsx`,
+        [
+          {
+            name: "測驗紀錄",
+            headers: ["使用者", "完成時間", "模式", "範圍", "題數", "已作答", "正確", "錯誤", "未作答", "分數"],
+            rows: sessionRows.map((row) => [profile.code, ...row])
+          },
+          {
+            name: "作答明細",
+            headers: ["使用者", "完成時間", "模式", "題號", "PDF頁", "題目", "作答", "正確答案", "結果"],
+            rows: detailRows.map((row) => [profile.code, ...row])
+          }
+        ]
+      );
     }
 
     function saveAndReturnHome() {
