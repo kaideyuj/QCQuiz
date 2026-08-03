@@ -232,6 +232,18 @@
       line-height: 1.65;
     }
 
+    .question-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 14px;
+    }
+
+    .question-actions button {
+      min-height: 38px;
+      padding: 8px 12px;
+      font-size: 14px;
+    }
+
     .option {
       display: flex;
       gap: 9px;
@@ -620,6 +632,11 @@
         <div id="bar"></div>
       </div>
 
+      <div class="question-actions">
+        <button id="copyQuestionBtn" class="secondary" type="button" onclick="copyCurrentQuestion()">
+          複製題目與選項
+        </button>
+      </div>
       <div id="qtext" class="qtitle"></div>
       <div id="opts"></div>
       <div class="nav">
@@ -690,7 +707,7 @@
           <table>
             <thead>
               <tr>
-                <th>完成時間</th>
+                <th>完成／更新時間</th>
                 <th>模式</th>
                 <th>範圍</th>
                 <th>題數</th>
@@ -710,7 +727,7 @@
           <table>
             <thead>
               <tr>
-                <th>完成時間</th>
+                <th>完成／更新時間</th>
                 <th>模式</th>
                 <th>題號</th>
                 <th>PDF頁</th>
@@ -761,7 +778,7 @@
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v11";
+    const HTML_VERSION = "v13";
     const HTML_BUILD_TIME = "2026-08-03";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
@@ -1164,7 +1181,7 @@
         <strong>目前代號：${escapeHtml(profile.code)}</strong>
         ${isCloudUser(profile.code) ? '<div class="small text-ok">雲端同步已啟用</div>' : ""}
         <div class="small">
-          完成 ${summary.quizCount} 次測驗｜作答 ${summary.answeredCount} 題｜
+          保存 ${summary.quizCount} 筆測驗紀錄｜作答 ${summary.answeredCount} 題｜
           正確 ${summary.correctCount} 題｜錯誤 ${summary.wrongCount} 題｜正確率 ${accuracy}
         </div>
         <div class="small">
@@ -1236,6 +1253,54 @@
       if (refreshHome) {
         updateProfileInfo();
       }
+    }
+
+    function restoreSequentialHistory(profile, beforeQuestionId) {
+      if (!profile || beforeQuestionId <= 1) {
+        return {};
+      }
+
+      const history = {};
+      const sequentialSessions = profile.sessions.filter(
+        (session) => session?.mode === "依序作答" && Array.isArray(session.details)
+      );
+
+      sequentialSessions.forEach((session) => {
+        session.details.forEach((detail) => {
+          const questionId = Number(detail?.id);
+
+          if (!Number.isInteger(questionId) || questionId >= beforeQuestionId || !detail.selected) {
+            return;
+          }
+
+          history[questionId] = {
+            selected: detail.selected,
+            confirmed: true,
+            isCorrect: detail.isCorrect,
+            answeredAt: session.completedAt || null,
+            historical: true
+          };
+        });
+      });
+
+      Object.entries(profile.questionStats || {}).forEach(([questionIdText, stats]) => {
+        const questionId = Number(questionIdText);
+
+        if (history[questionId] || !Number.isInteger(questionId)
+          || questionId >= beforeQuestionId || !stats?.lastAnswer) {
+          return;
+        }
+
+        history[questionId] = {
+          selected: stats.lastAnswer,
+          confirmed: true,
+          isCorrect: stats.lastCorrect,
+          answeredAt: stats.lastAt,
+          historical: true
+        };
+      });
+
+      return history;
     }
 
     function updateHistory() {
@@ -1448,25 +1513,23 @@
         ? getSequentialProgressQuestionId(profile)
         : 1;
 
-      qs = bank
-        .filter((question) => question.id >= startQuestionId)
-        .sort((a, b) => a.id - b.id);
+      qs = [...bank].sort((a, b) => a.id - b.id);
+      responses = restoreSequentialHistory(profile, startQuestionId);
+      idx = qs.findIndex((question) => question.id === startQuestionId);
 
-      if (!qs.length) {
-        window.alert("找不到可接續的題目，將從第 1 題重新開始。");
-        qs = [...bank].sort((a, b) => a.id - b.id);
+      if (idx < 0) {
+        idx = 0;
       }
-
-      responses = {};
-      idx = 0;
       quizContext = {
+        sessionId: `sequential-${Date.now()}`,
         startedAt: nowIso(),
         unit: "全部單元",
         mode: "依序作答",
         requestedCount: qs.length,
         userCode: activeUserCode,
         sequential: true,
-        sequentialStartId: qs[0]?.id || 1
+        sequentialStartId: startQuestionId,
+        sequentialProgressId: startQuestionId
       };
 
       show("quiz");
@@ -1590,6 +1653,62 @@
       render();
     }
 
+    function currentQuestionCopyText(question) {
+      const options = question.choice_order
+        .map((key) => `${key}. ${question.options[key]}`)
+        .join("\n");
+      return `原題號 ${question.id}\n${question.question}\n\n${options}`;
+    }
+
+    function fallbackCopyText(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      textarea.setSelectionRange(0, text.length);
+      const copied = document.execCommand("copy");
+      textarea.remove();
+
+      if (!copied) {
+        throw new Error("瀏覽器拒絕存取剪貼簿。");
+      }
+    }
+
+    async function copyCurrentQuestion() {
+      const question = qs[idx];
+      const button = $("copyQuestionBtn");
+
+      if (!question || !button) {
+        return;
+      }
+
+      const text = currentQuestionCopyText(question);
+      try {
+        let copied = false;
+        if (navigator.clipboard?.writeText && window.isSecureContext) {
+          try {
+            await navigator.clipboard.writeText(text);
+            copied = true;
+          } catch (error) {
+            copied = false;
+          }
+        }
+        if (!copied) {
+          fallbackCopyText(text);
+        }
+
+        button.textContent = "已複製";
+        window.setTimeout(() => {
+          button.textContent = "複製題目與選項";
+        }, 1600);
+      } catch (error) {
+        window.alert(`複製失敗：${error.message}`);
+      }
+    }
+
     function confirmCurrentAnswer() {
       const question = qs[idx];
       const response = responses[question.id];
@@ -1603,6 +1722,17 @@
         response.confirmed = true;
         response.isCorrect = response.selected === question.answer;
         response.answeredAt = nowIso();
+        saveSequentialAnswer(question, response);
+
+        if (quizContext?.sequential) {
+          const nextQuestionId = qs[idx + 1]?.id || question.id;
+          quizContext.sequentialProgressId = Math.max(
+            quizContext.sequentialProgressId || 1,
+            nextQuestionId
+          );
+          saveSequentialProgress(quizContext.sequentialProgressId);
+        }
+
         render();
         return false;
       }
@@ -1675,10 +1805,6 @@
       });
 
       renderNavigation();
-
-      if (quizContext?.sequential) {
-        saveSequentialProgress(question.id);
-      }
     }
 
     function renderNavigation() {
@@ -1707,6 +1833,82 @@
     // ============================================================
     // 交卷、保存與統計
     // ============================================================
+    function saveSequentialAnswer(question, response) {
+      if (!activeUserCode || !quizContext?.sequential || !response?.confirmed) {
+        return null;
+      }
+
+      const store = loadStore();
+      const profile = store.profiles[activeUserCode] || createProfile(activeUserCode);
+      const timestamp = response.answeredAt || nowIso();
+      const sessionId = quizContext.sessionId || `sequential-${Date.now()}`;
+      let session = profile.sessions.find((item) => item.id === sessionId);
+
+      if (!session) {
+        session = {
+          id: sessionId,
+          startedAt: quizContext.startedAt || timestamp,
+          completedAt: timestamp,
+          unit: quizContext.unit || "全部單元",
+          mode: "依序作答",
+          questionCount: 0,
+          answeredCount: 0,
+          correctCount: 0,
+          wrongCount: 0,
+          unansweredCount: 0,
+          score: 0,
+          details: []
+        };
+        profile.sessions.push(session);
+        profile.summary.quizCount += 1;
+      }
+
+      if (session.details.some((detail) => Number(detail.id) === question.id)) {
+        return profile;
+      }
+
+      const detail = {
+        id: question.id,
+        selected: response.selected,
+        answer: question.answer,
+        isCorrect: response.isCorrect
+      };
+      session.details.push(detail);
+      session.questionCount = session.details.length;
+      session.answeredCount = session.details.length;
+      session.correctCount = session.details.filter((item) => item.isCorrect === true).length;
+      session.wrongCount = session.details.filter((item) => item.isCorrect === false).length;
+      session.unansweredCount = 0;
+      session.score = Math.round((session.correctCount / session.answeredCount) * 100);
+      session.completedAt = timestamp;
+
+      const key = String(question.id);
+      const stats = profile.questionStats[key] || {
+        attempts: 0,
+        correct: 0,
+        wrong: 0,
+        lastAnswer: null,
+        lastCorrect: null,
+        lastAt: null
+      };
+      stats.attempts += 1;
+      stats.correct += response.isCorrect ? 1 : 0;
+      stats.wrong += response.isCorrect ? 0 : 1;
+      stats.lastAnswer = response.selected;
+      stats.lastCorrect = response.isCorrect;
+      stats.lastAt = timestamp;
+      profile.questionStats[key] = stats;
+
+      profile.summary.answeredCount += 1;
+      profile.summary.correctCount += response.isCorrect ? 1 : 0;
+      profile.summary.wrongCount += response.isCorrect ? 0 : 1;
+      profile.updatedAt = timestamp;
+      profile.sessions = profile.sessions.slice(-MAX_SESSION_HISTORY);
+      store.profiles[activeUserCode] = profile;
+      saveStore(store);
+      return profile;
+    }
+
     function buildSessionResult() {
       const details = qs.map((question) => {
         const savedResponse = responses[question.id] || null;
@@ -1815,11 +2017,18 @@
         }
       }
 
-      const session = buildSessionResult();
-      const savedProfile = saveSessionForActiveUser(session);
+      let session;
+      let savedProfile;
 
       if (quizContext?.sequential && activeUserCode) {
+        savedProfile = getActiveProfile();
+        session = savedProfile?.sessions.find(
+          (item) => item.id === quizContext.sessionId
+        ) || buildSessionResult();
         saveSequentialProgress(1);
+      } else {
+        session = buildSessionResult();
+        savedProfile = saveSessionForActiveUser(session);
       }
 
       renderResult(session, savedProfile);
@@ -1863,7 +2072,7 @@
       container.innerHTML = `
         <div class="summary-card">
           <span class="number">${summary.quizCount}</span>
-          <span class="small">完成測驗</span>
+          <span class="small">測驗紀錄</span>
         </div>
         <div class="summary-card">
           <span class="number">${summary.answeredCount}</span>
@@ -2051,12 +2260,12 @@
         [
           {
             name: "測驗紀錄",
-            headers: ["使用者", "完成時間", "模式", "範圍", "題數", "已作答", "正確", "錯誤", "未作答", "分數"],
+            headers: ["使用者", "完成／更新時間", "模式", "範圍", "題數", "已作答", "正確", "錯誤", "未作答", "分數"],
             rows: sessionRows.map((row) => [profile.code, ...row])
           },
           {
             name: "作答明細",
-            headers: ["使用者", "完成時間", "模式", "題號", "PDF頁", "題目", "作答", "正確答案", "結果"],
+            headers: ["使用者", "完成／更新時間", "模式", "題號", "PDF頁", "題目", "作答", "正確答案", "結果"],
             rows: detailRows.map((row) => [profile.code, ...row])
           }
         ]
@@ -2067,7 +2276,9 @@
       const currentQuestion = qs[idx];
 
       if (quizContext?.sequential && currentQuestion) {
-        saveSequentialProgress(currentQuestion.id);
+        saveSequentialProgress(
+          quizContext.sequentialProgressId || currentQuestion.id
+        );
       }
 
       returnHome();

@@ -77,9 +77,39 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('src="xlsx-export.js"', self.index)
         self.assertIn('name: "測驗紀錄"', self.index)
         self.assertIn('name: "作答明細"', self.index)
-        self.assertIn('["使用者", "完成時間", "模式"', self.index)
+        self.assertIn('["使用者", "完成／更新時間", "模式"', self.index)
         self.assertIn("function buildWorkbook(inputSheets)", self.xlsx_export)
         self.assertIn("application/vnd.openxmlformats-officedocument", self.xlsx_export)
+
+    def test_sequential_answers_are_saved_into_records(self):
+        self.assertIn("function saveSequentialAnswer(question, response)", self.index)
+        self.assertIn("saveSequentialAnswer(question, response);", self.index)
+        self.assertIn('sessionId: `sequential-${Date.now()}`', self.index)
+        self.assertIn('mode: "依序作答"', self.index)
+        self.assertIn("profile.summary.answeredCount += 1;", self.index)
+
+    def test_synced_sequential_progress_can_review_previous_answers(self):
+        self.assertIn(
+            "function restoreSequentialHistory(profile, beforeQuestionId)",
+            self.index
+        )
+        self.assertIn("responses = restoreSequentialHistory", self.index)
+        self.assertIn("qs = [...bank].sort", self.index)
+        self.assertIn("idx = qs.findIndex", self.index)
+        self.assertIn("historical: true", self.index)
+        self.assertIn("sequentialProgressId: startQuestionId", self.index)
+        self.assertIn(
+            "quizContext.sequentialProgressId || currentQuestion.id",
+            self.index
+        )
+        self.assertNotIn("saveSequentialProgress(question.id);", self.index)
+
+    def test_current_question_and_options_can_be_copied(self):
+        self.assertIn('id="copyQuestionBtn"', self.index)
+        self.assertIn("function copyCurrentQuestion()", self.index)
+        self.assertIn("function currentQuestionCopyText(question)", self.index)
+        self.assertIn("navigator.clipboard.writeText(text)", self.index)
+        self.assertIn("fallbackCopyText(text)", self.index)
 
     def test_clear_all_profiles_is_scoped_and_password_protected(self):
         self.assertIn('const CLEAR_ALL_PASSWORD = "1234";', self.index)
