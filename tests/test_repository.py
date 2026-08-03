@@ -117,6 +117,5 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('hasPendingAnswer ? "提送" : "交卷"', self.index)
         self.assertNotIn("function answerQuestion(question, selectedKey)", self.index)
 
-
 if __name__ == "__main__":
     unittest.main()
