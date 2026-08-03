@@ -535,6 +535,12 @@
         <div class="small">未輸入代號時仍可測驗，但不會保存任何作答紀錄。</div>
       </div>
 
+      <div id="syncPasswordField" class="field hidden">
+        <label for="syncPassword">雲端同步密碼</label>
+        <input id="syncPassword" type="password" autocomplete="current-password">
+        <div id="syncStatus" class="small">yuj- 開頭的代號會同步至雲端。</div>
+      </div>
+
       <div id="profileInfo" class="profile-card"></div>
 
       <div class="mode-card">
@@ -692,18 +698,20 @@
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v9";
-    const HTML_BUILD_TIME = "2026-07-21 10:24";
+    const HTML_VERSION = "v10";
+    const HTML_BUILD_TIME = "2026-08-03";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
     const DATA_FILE = "questions_v3.json";
     const DATA_CACHE_KEY = "questions-v3-202607210038";
 
-    // 使用者紀錄只存在目前瀏覽器的 localStorage。
+    // 一般代號保存在瀏覽器；yuj- 開頭的代號也會透過 Worker 同步。
     const PROFILE_STORAGE_KEY = "qcQuizProfilesV4";
     const ACTIVE_USER_KEY = "qcQuizActiveUserV4";
     const CLEAR_ALL_PASSWORD = "1234";
     const MAX_SESSION_HISTORY = 50;
+    const SYNC_API_URL = "https://qcquiz-sync.kaideyuj.workers.dev";
+    const SYNC_PREFIX = "yuj-";
 
     let bank = [];
     let qs = [];
@@ -711,6 +719,10 @@
     let idx = 0;
     let quizContext = null;
     let activeUserCode = "";
+    let cloudSyncTimer = null;
+    let cloudSyncBusy = false;
+    let cloudSyncPending = false;
+    let cloudLoadedCode = "";
 
     const $ = (id) => document.getElementById(id);
 
@@ -760,8 +772,82 @@
     }
 
     // ============================================================
-    // 使用者代號與本機紀錄
+    // 使用者代號、本機紀錄與雲端同步
     // ============================================================
+    function isCloudUser(code) {
+      return String(code || "").startsWith(SYNC_PREFIX);
+    }
+
+    function setSyncStatus(message, isError = false) {
+      const status = $("syncStatus");
+      status.textContent = message;
+      status.classList.toggle("text-bad", isError);
+    }
+
+    function updateSyncPasswordVisibility() {
+      const cloudUser = isCloudUser($("userCode").value.trim());
+      $("syncPasswordField").classList.toggle("hidden", !cloudUser);
+    }
+
+    async function cloudRequest(code, method, profile = null) {
+      const password = $("syncPassword").value;
+      if (!password) {
+        throw new Error("請輸入雲端同步密碼。");
+      }
+
+      const result = await fetch(`${SYNC_API_URL}/progress/${encodeURIComponent(code)}`, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Sync-Password": password
+        },
+        body: profile ? JSON.stringify({ profile }) : undefined,
+        cache: "no-store"
+      });
+      const body = await result.json().catch(() => ({}));
+
+      if (!result.ok) {
+        const error = new Error(body.error || `同步服務回傳 ${result.status}`);
+        error.status = result.status;
+        throw error;
+      }
+      return body;
+    }
+
+    async function uploadCloudProfile(code) {
+      if (cloudSyncBusy || !isCloudUser(code) || !$("syncPassword").value) {
+        return;
+      }
+      const profile = loadStore().profiles[code];
+      if (!profile) {
+        return;
+      }
+
+      cloudSyncBusy = true;
+      cloudSyncPending = false;
+      setSyncStatus("正在同步進度…");
+      try {
+        await cloudRequest(code, "PUT", profile);
+        setSyncStatus(`已同步：${new Date().toLocaleTimeString("zh-TW")}`);
+      } catch (error) {
+        setSyncStatus(`同步失敗：${error.message}`, true);
+      } finally {
+        cloudSyncBusy = false;
+        if (cloudSyncPending) {
+          queueCloudSync(code);
+        }
+      }
+    }
+
+    function queueCloudSync(code) {
+      if (!isCloudUser(code) || !$("syncPassword").value) {
+        return;
+      }
+      cloudSyncPending = true;
+      window.clearTimeout(cloudSyncTimer);
+      cloudSyncTimer = window.setTimeout(() => uploadCloudProfile(code), 500);
+    }
+
     function emptyStore() {
       return {
         profiles: {}
@@ -855,8 +941,11 @@
       }
     }
 
-    function saveStore(store) {
+    function saveStore(store, sync = true) {
       localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(store));
+      if (sync) {
+        queueCloudSync(activeUserCode);
+      }
     }
 
     function createProfile(code) {
@@ -904,8 +993,10 @@
         });
     }
 
-    function applyUserCode() {
+    async function applyUserCode() {
       const code = $("userCode").value.trim();
+      const previousCode = activeUserCode;
+      updateSyncPasswordVisibility();
 
       if (!code) {
         activeUserCode = "";
@@ -915,6 +1006,65 @@
       }
 
       const store = loadStore();
+
+      if (isCloudUser(code) && !(code === activeUserCode && cloudLoadedCode === code)) {
+        if (!$("syncPassword").value) {
+          setSyncStatus("請輸入雲端同步密碼。", true);
+          $("syncPassword").focus();
+          return false;
+        }
+
+        setSyncStatus("正在下載雲端進度…");
+        try {
+          const cloud = await cloudRequest(code, "GET");
+          store.profiles[code] = normalizeProfile(code, cloud.profile);
+          saveStore(store, false);
+          cloudLoadedCode = code;
+          setSyncStatus("雲端進度已載入。");
+        } catch (error) {
+          if (error.status !== 404) {
+            setSyncStatus(`載入失敗：${error.message}`, true);
+            return false;
+          }
+
+          const previousProfile = previousCode && !isCloudUser(previousCode)
+            ? store.profiles[previousCode]
+            : null;
+          const shouldMigrate = previousProfile && window.confirm(
+            `雲端代號「${code}」尚無紀錄。\n\n`
+            + `是否將目前代號「${previousCode}」的進度複製到雲端？`
+          );
+
+          if (shouldMigrate) {
+            store.profiles[code] = normalizeProfile(code, {
+              ...previousProfile,
+              code,
+              migratedFrom: previousCode,
+              migratedAt: nowIso(),
+              updatedAt: nowIso()
+            });
+            setSyncStatus(`正在搬移「${previousCode}」的進度…`);
+          } else if (!store.profiles[code]) {
+            store.profiles[code] = createProfile(code);
+          }
+          saveStore(store, false);
+
+          if (!shouldMigrate) {
+            setSyncStatus("這是新的雲端代號，正在建立紀錄…");
+          }
+          try {
+            await cloudRequest(code, "PUT", store.profiles[code]);
+            cloudLoadedCode = code;
+            setSyncStatus(shouldMigrate
+              ? `已將「${previousCode}」的進度複製到雲端。`
+              : "新的雲端紀錄已建立。"
+            );
+          } catch (uploadError) {
+            setSyncStatus(`建立失敗：${uploadError.message}`, true);
+            return false;
+          }
+        }
+      }
 
       if (!store.profiles[code]) {
         store.profiles[code] = createProfile(code);
@@ -926,6 +1076,7 @@
       $("userCode").value = code;
       refreshProfileList();
       updateProfileInfo();
+      return true;
     }
 
     function updateProfileInfo() {
@@ -948,6 +1099,7 @@
 
       box.innerHTML = `
         <strong>目前代號：${escapeHtml(profile.code)}</strong>
+        ${isCloudUser(profile.code) ? '<div class="small text-ok">雲端同步已啟用</div>' : ""}
         <div class="small">
           完成 ${summary.quizCount} 次測驗｜作答 ${summary.answeredCount} 題｜
           正確 ${summary.correctCount} 題｜錯誤 ${summary.wrongCount} 題｜正確率 ${accuracy}
@@ -1045,7 +1197,7 @@
       $("history").textContent = `代號「${profile.code}」最近成績：${recent}`;
     }
 
-    function clearCurrentProfile() {
+    async function clearCurrentProfile() {
       if (!activeUserCode) {
         return;
       }
@@ -1054,6 +1206,17 @@
 
       if (!window.confirm(message)) {
         return;
+      }
+
+      if (isCloudUser(activeUserCode)) {
+        try {
+          setSyncStatus("正在清除雲端進度…");
+          await cloudRequest(activeUserCode, "PUT", createProfile(activeUserCode));
+          setSyncStatus("雲端進度已清除。");
+        } catch (error) {
+          setSyncStatus(`清除失敗：${error.message}`, true);
+          return;
+        }
       }
 
       const store = loadStore();
@@ -1127,6 +1290,7 @@
         $("userCode").value = savedCode;
       }
 
+      updateSyncPasswordVisibility();
       refreshProfileList();
       updateProfileInfo();
     }
@@ -1207,12 +1371,14 @@
       return Math.max(1, Math.min(requested, poolLength));
     }
 
-    function startSequentialQuiz() {
+    async function startSequentialQuiz() {
       if (!bank.length) {
         return;
       }
 
-      applyUserCode();
+      if (await applyUserCode() === false) {
+        return;
+      }
 
       const profile = getActiveProfile();
       const startQuestionId = profile
@@ -1245,13 +1411,15 @@
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
-    function startQuiz(wrongOnly) {
+    async function startQuiz(wrongOnly) {
       if (!bank.length) {
         return;
       }
 
       // 將目前輸入框內容套用為使用者代號；空白即訪客模式。
-      applyUserCode();
+      if (await applyUserCode() === false) {
+        return;
+      }
 
       let pool = bank;
       const selectedUnit = $("unit").value;
@@ -1305,12 +1473,14 @@
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
-    function lookupQuestion() {
+    async function lookupQuestion() {
       if (!bank.length) {
         return;
       }
 
-      applyUserCode();
+      if (await applyUserCode() === false) {
+        return;
+      }
 
       const questionId = Number($("lookupId").value);
       const question = bank.find((item) => item.id === questionId);
@@ -1389,7 +1559,8 @@
         $("bar").style.width = `${((idx + 1) / qs.length) * 100}%`;
       }
 
-      $("meta").textContent = `原題號 ${question.id}｜PDF 第 ${question.page} 頁`;
+      const quizUserLabel = quizContext?.userCode || "訪客";
+      $("meta").textContent = `使用者：${quizUserLabel}｜原題號 ${question.id}｜PDF 第 ${question.page} 頁`;
       $("qtext").textContent = question.question;
 
       const optionsBox = $("opts");
@@ -1712,6 +1883,17 @@
         event.preventDefault();
         applyUserCode();
       }
+    });
+
+    $("userCode").addEventListener("input", updateSyncPasswordVisibility);
+    $("syncPassword").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyUserCode();
+      }
+    });
+    $("syncPassword").addEventListener("input", () => {
+      cloudLoadedCode = "";
     });
   </script>
 </body>

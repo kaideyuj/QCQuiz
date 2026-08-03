@@ -56,6 +56,18 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('const PROFILE_STORAGE_KEY = "qcQuizProfilesV4";', self.index)
         self.assertIn('const ACTIVE_USER_KEY = "qcQuizActiveUserV4";', self.index)
 
+    def test_yuj_profiles_use_secure_cloud_sync_endpoint(self):
+        self.assertIn(
+            'const SYNC_API_URL = "https://qcquiz-sync.kaideyuj.workers.dev";',
+            self.index
+        )
+        self.assertIn('const SYNC_PREFIX = "yuj-";', self.index)
+        self.assertIn('id="syncPassword"', self.index)
+        self.assertIn('"X-Sync-Password": password', self.index)
+        self.assertNotIn("GITHUB_TOKEN", self.index)
+        self.assertIn("是否將目前代號", self.index)
+        self.assertIn("migratedFrom: previousCode", self.index)
+
     def test_clear_all_profiles_is_scoped_and_password_protected(self):
         self.assertIn('const CLEAR_ALL_PASSWORD = "1234";', self.index)
         self.assertIn('id="clearAllPassword"', self.index)
@@ -93,6 +105,8 @@ class RepositoryTests(unittest.TestCase):
         self.assertNotIn("答對：", self.index)
         self.assertNotIn('id="feedback"', self.index)
         self.assertNotIn("renderFeedback", self.index)
+        self.assertIn('const quizUserLabel = quizContext?.userCode || "訪客";', self.index)
+        self.assertIn('`使用者：${quizUserLabel}｜原題號', self.index)
 
     def test_answers_are_graded_only_after_confirmation(self):
         self.assertIn("function selectAnswer(question, selectedKey)", self.index)
