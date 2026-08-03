@@ -232,6 +232,18 @@
       line-height: 1.65;
     }
 
+    .question-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 14px;
+    }
+
+    .question-actions button {
+      min-height: 38px;
+      padding: 8px 12px;
+      font-size: 14px;
+    }
+
     .option {
       display: flex;
       gap: 9px;
@@ -620,6 +632,11 @@
         <div id="bar"></div>
       </div>
 
+      <div class="question-actions">
+        <button id="copyQuestionBtn" class="secondary" type="button" onclick="copyCurrentQuestion()">
+          複製題目與選項
+        </button>
+      </div>
       <div id="qtext" class="qtitle"></div>
       <div id="opts"></div>
       <div class="nav">
@@ -761,7 +778,7 @@
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v11";
+    const HTML_VERSION = "v12";
     const HTML_BUILD_TIME = "2026-08-03";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
@@ -1589,6 +1606,62 @@
       };
 
       render();
+    }
+
+    function currentQuestionCopyText(question) {
+      const options = question.choice_order
+        .map((key) => `${key}. ${question.options[key]}`)
+        .join("\n");
+      return `原題號 ${question.id}\n${question.question}\n\n${options}`;
+    }
+
+    function fallbackCopyText(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      textarea.setSelectionRange(0, text.length);
+      const copied = document.execCommand("copy");
+      textarea.remove();
+
+      if (!copied) {
+        throw new Error("瀏覽器拒絕存取剪貼簿。");
+      }
+    }
+
+    async function copyCurrentQuestion() {
+      const question = qs[idx];
+      const button = $("copyQuestionBtn");
+
+      if (!question || !button) {
+        return;
+      }
+
+      const text = currentQuestionCopyText(question);
+      try {
+        let copied = false;
+        if (navigator.clipboard?.writeText && window.isSecureContext) {
+          try {
+            await navigator.clipboard.writeText(text);
+            copied = true;
+          } catch (error) {
+            copied = false;
+          }
+        }
+        if (!copied) {
+          fallbackCopyText(text);
+        }
+
+        button.textContent = "已複製";
+        window.setTimeout(() => {
+          button.textContent = "複製題目與選項";
+        }, 1600);
+      } catch (error) {
+        window.alert(`複製失敗：${error.message}`);
+      }
     }
 
     function confirmCurrentAnswer() {

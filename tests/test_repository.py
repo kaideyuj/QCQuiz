@@ -87,6 +87,14 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('sessionId: `sequential-${Date.now()}`', self.index)
         self.assertIn('mode: "依序作答"', self.index)
         self.assertIn("profile.summary.answeredCount += 1;", self.index)
+
+    def test_current_question_and_options_can_be_copied(self):
+        self.assertIn('id="copyQuestionBtn"', self.index)
+        self.assertIn("function copyCurrentQuestion()", self.index)
+        self.assertIn("function currentQuestionCopyText(question)", self.index)
+        self.assertIn("navigator.clipboard.writeText(text)", self.index)
+        self.assertIn("fallbackCopyText(text)", self.index)
+
     def test_clear_all_profiles_is_scoped_and_password_protected(self):
         self.assertIn('const CLEAR_ALL_PASSWORD = "1234";', self.index)
         self.assertIn('id="clearAllPassword"', self.index)
