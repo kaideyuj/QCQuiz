@@ -104,6 +104,33 @@ class RepositoryTests(unittest.TestCase):
         )
         self.assertNotIn("saveSequentialProgress(question.id);", self.index)
 
+    def test_sequential_wrong_answers_are_saved_by_completed_round(self):
+        self.assertIn("function normalizeSequentialRounds(rounds)", self.index)
+        self.assertIn(
+            "function normalizeSequentialRoundProgress(progress, completedRoundCount)",
+            self.index
+        )
+        self.assertIn("sequentialRounds: []", self.index)
+        self.assertIn("sequentialRoundProgress: null", self.index)
+        self.assertIn("profile.sequentialRoundProgress = {", self.index)
+        self.assertIn("function completeSequentialRound()", self.index)
+        self.assertIn("profile.sequentialRounds.push({", self.index)
+        self.assertIn("wrongQuestionIds", self.index)
+        self.assertIn("savedProfile = completeSequentialRound();", self.index)
+
+    def test_sequential_wrong_review_selects_one_round_only(self):
+        self.assertIn('id="sequentialRoundSelect"', self.index)
+        self.assertIn('onclick="startSequentialWrongQuiz()"', self.index)
+        self.assertIn("function updateSequentialWrongModeInfo()", self.index)
+        self.assertIn("function startSequentialWrongQuiz()", self.index)
+        self.assertIn(
+            "const wrongIds = new Set(round.wrongQuestionIds);",
+            self.index
+        )
+        self.assertIn('mode: "依序錯題複習"', self.index)
+        self.assertIn("sourceSequentialRound: round.roundNumber", self.index)
+        self.assertNotIn("flatMap((round) => round.wrongQuestionIds", self.index)
+
     def test_current_question_and_options_can_be_copied(self):
         self.assertIn('id="copyQuestionBtn"', self.index)
         self.assertIn("function copyCurrentQuestion()", self.index)

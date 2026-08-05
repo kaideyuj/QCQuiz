@@ -326,6 +326,21 @@
       flex: 0 0 auto;
     }
 
+    .mode-card > div {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .mode-card select {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #ffffff;
+    }
+
     .score {
       margin: 6px 0;
       font-size: 42px;
@@ -572,6 +587,32 @@
         </button>
       </div>
 
+      <div class="mode-card">
+        <div>
+          <strong>依序錯題複習</strong>
+          <div id="sequentialWrongHint" class="small">
+            完成一整輪依序作答後，即可選擇該輪錯題。
+          </div>
+          <select
+            id="sequentialRoundSelect"
+            aria-label="選擇依序作答輪次"
+            onchange="updateSequentialWrongSelection()"
+            disabled
+          >
+            <option value="">尚無已完成輪次</option>
+          </select>
+        </div>
+        <button
+          id="sequentialWrongBtn"
+          class="secondary"
+          type="button"
+          onclick="startSequentialWrongQuiz()"
+          disabled
+        >
+          開始錯題複習
+        </button>
+      </div>
+
       <div class="field">
         <label for="unit">出題範圍</label>
         <select id="unit">
@@ -778,8 +819,8 @@
     // ============================================================
     // 版本與題庫設定
     // ============================================================
-    const HTML_VERSION = "v14";
-    const HTML_BUILD_TIME = "2026-08-03";
+    const HTML_VERSION = "v15";
+    const HTML_BUILD_TIME = "2026-08-05";
     const QUESTIONS_VERSION = "v3";
     const QUESTIONS_BUILD_TIME = "2026-07-21 00:38";
     const DATA_FILE = "questions_v3.json";
@@ -960,6 +1001,58 @@
       );
     }
 
+    function normalizeQuestionIds(questionIds) {
+      if (!Array.isArray(questionIds)) {
+        return [];
+      }
+
+      return [...new Set(
+        questionIds
+          .map((questionId) => Number(questionId))
+          .filter((questionId) => Number.isInteger(questionId) && questionId > 0)
+      )].sort((a, b) => a - b);
+    }
+
+    function normalizeSequentialRounds(rounds) {
+      if (!Array.isArray(rounds)) {
+        return [];
+      }
+
+      return rounds.map((round, index) => {
+        const safeRound = round && typeof round === "object" ? round : {};
+        const roundNumber = Number(safeRound.roundNumber);
+
+        return {
+          ...safeRound,
+          roundNumber: Number.isInteger(roundNumber) && roundNumber > 0
+            ? roundNumber
+            : index + 1,
+          startedAt: safeRound.startedAt ?? null,
+          completedAt: safeRound.completedAt ?? null,
+          questionCount: nonNegativeInteger(safeRound.questionCount),
+          wrongQuestionIds: normalizeQuestionIds(safeRound.wrongQuestionIds)
+        };
+      });
+    }
+
+    function normalizeSequentialRoundProgress(progress, completedRoundCount) {
+      if (!progress || typeof progress !== "object" || Array.isArray(progress)) {
+        return null;
+      }
+
+      const roundNumber = Number(progress.roundNumber);
+
+      return {
+        ...progress,
+        roundNumber: Number.isInteger(roundNumber) && roundNumber > 0
+          ? roundNumber
+          : completedRoundCount + 1,
+        startedAt: progress.startedAt ?? null,
+        updatedAt: progress.updatedAt ?? null,
+        wrongQuestionIds: normalizeQuestionIds(progress.wrongQuestionIds)
+      };
+    }
+
     function normalizeProfile(code, profile) {
       const safeProfile = profile && typeof profile === "object" ? profile : {};
       const safeSummary = safeProfile.summary && typeof safeProfile.summary === "object"
@@ -969,6 +1062,7 @@
         && typeof safeProfile.sequentialProgress === "object"
         ? safeProfile.sequentialProgress
         : {};
+      const sequentialRounds = normalizeSequentialRounds(safeProfile.sequentialRounds);
 
       return {
         ...safeProfile,
@@ -984,6 +1078,11 @@
         },
         questionStats: normalizeQuestionStats(safeProfile.questionStats),
         sessions: Array.isArray(safeProfile.sessions) ? safeProfile.sessions : [],
+        sequentialRounds,
+        sequentialRoundProgress: normalizeSequentialRoundProgress(
+          safeProfile.sequentialRoundProgress,
+          sequentialRounds.length
+        ),
         sequentialProgress: {
           ...safeProgress,
           questionId: Number.isInteger(Number(safeProgress.questionId))
@@ -1043,6 +1142,8 @@
         },
         questionStats: {},
         sessions: [],
+        sequentialRounds: [],
+        sequentialRoundProgress: null,
         sequentialProgress: {
           questionId: 1,
           updatedAt: null
@@ -1168,6 +1269,7 @@
         box.innerHTML = "<strong>訪客模式</strong><div class=\"small\">本次作答不會寫入瀏覽器紀錄。</div>";
         clearButton.classList.add("hidden");
         updateSequentialModeInfo();
+        updateSequentialWrongModeInfo();
         updateHistory();
         return;
       }
@@ -1187,10 +1289,14 @@
         <div class="small">
           依序作答進度：下次從原題號 ${sequentialQuestionId} 開始。
         </div>
+        <div class="small">
+          已完成 ${profile.sequentialRounds.length} 輪依序作答。
+        </div>
       `;
 
       clearButton.classList.remove("hidden");
       updateSequentialModeInfo();
+      updateSequentialWrongModeInfo();
       updateHistory();
     }
 
@@ -1221,10 +1327,74 @@
       }
 
       const questionId = getSequentialProgressQuestionId(profile);
-      hint.textContent = `代號「${profile.code}」已保存進度，下次從原題號 ${questionId} 開始。`;
+      const roundNumber = profile.sequentialRoundProgress?.roundNumber
+        || profile.sequentialRounds.length + 1;
+      hint.textContent = `第 ${roundNumber} 輪已保存進度，下次從原題號 ${questionId} 開始。`;
       button.textContent = questionId === 1
-        ? "從第 1 題開始"
-        : `從第 ${questionId} 題續答`;
+        ? `開始第 ${roundNumber} 輪`
+        : `繼續第 ${roundNumber} 輪（第 ${questionId} 題）`;
+    }
+
+    function updateSequentialWrongModeInfo() {
+      const select = $("sequentialRoundSelect");
+      const button = $("sequentialWrongBtn");
+      const profile = getActiveProfile();
+      const previousValue = select.value;
+      select.innerHTML = "";
+
+      if (!profile?.sequentialRounds.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "尚無已完成輪次";
+        select.appendChild(option);
+        select.disabled = true;
+        button.disabled = true;
+        $("sequentialWrongHint").textContent = profile
+          ? "完成一整輪依序作答後，即可選擇該輪錯題。"
+          : "請先輸入使用者代號，才能讀取各輪錯題。";
+        return;
+      }
+
+      profile.sequentialRounds.forEach((round) => {
+        const option = document.createElement("option");
+        option.value = String(round.roundNumber);
+        option.textContent = [
+          `第 ${round.roundNumber} 輪`,
+          `${round.wrongQuestionIds.length} 題錯題`,
+          formatRecordDate(round.completedAt)
+        ].join("｜");
+        select.appendChild(option);
+      });
+
+      select.disabled = false;
+      const preserved = profile.sequentialRounds.some(
+        (round) => String(round.roundNumber) === previousValue
+      );
+      select.value = preserved
+        ? previousValue
+        : String(profile.sequentialRounds[profile.sequentialRounds.length - 1].roundNumber);
+      updateSequentialWrongSelection();
+    }
+
+    function updateSequentialWrongSelection() {
+      const profile = getActiveProfile();
+      const roundNumber = Number($("sequentialRoundSelect").value);
+      const round = profile?.sequentialRounds.find(
+        (item) => item.roundNumber === roundNumber
+      );
+      const button = $("sequentialWrongBtn");
+      const hint = $("sequentialWrongHint");
+
+      if (!round) {
+        button.disabled = true;
+        return;
+      }
+
+      const wrongCount = round.wrongQuestionIds.length;
+      button.disabled = wrongCount === 0;
+      hint.textContent = wrongCount
+        ? `第 ${round.roundNumber} 輪共有 ${wrongCount} 題答錯，可依原題號順序複習。`
+        : `第 ${round.roundNumber} 輪全部答對，沒有錯題需要複習。`;
     }
 
     function saveSequentialProgress(questionId, refreshHome = false) {
@@ -1520,6 +1690,17 @@
       if (idx < 0) {
         idx = 0;
       }
+
+      const restoredWrongIds = Object.entries(responses)
+        .filter(([, response]) => response.isCorrect === false)
+        .map(([questionId]) => Number(questionId));
+      const initialWrongIds = normalizeQuestionIds([
+        ...(profile?.sequentialRoundProgress?.wrongQuestionIds || []),
+        ...restoredWrongIds
+      ]);
+      const roundNumber = profile?.sequentialRoundProgress?.roundNumber
+        || profile?.sequentialRounds.length + 1
+        || 1;
       quizContext = {
         sessionId: `sequential-${Date.now()}`,
         startedAt: nowIso(),
@@ -1529,7 +1710,55 @@
         userCode: activeUserCode,
         sequential: true,
         sequentialStartId: startQuestionId,
-        sequentialProgressId: startQuestionId
+        sequentialProgressId: startQuestionId,
+        sequentialRoundNumber: roundNumber,
+        sequentialRoundStartedAt: profile?.sequentialRoundProgress?.startedAt || nowIso(),
+        sequentialInitialWrongIds: initialWrongIds
+      };
+
+      show("quiz");
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    async function startSequentialWrongQuiz() {
+      if (!bank.length || await applyUserCode() === false) {
+        return;
+      }
+
+      const profile = getActiveProfile();
+      const roundNumber = Number($("sequentialRoundSelect").value);
+      const round = profile?.sequentialRounds.find(
+        (item) => item.roundNumber === roundNumber
+      );
+
+      if (!round) {
+        window.alert("找不到選擇的依序作答輪次，請重新選擇。");
+        updateSequentialWrongModeInfo();
+        return;
+      }
+
+      const wrongIds = new Set(round.wrongQuestionIds);
+      qs = bank
+        .filter((question) => wrongIds.has(question.id))
+        .sort((a, b) => a.id - b.id);
+
+      if (!qs.length) {
+        window.alert(`第 ${round.roundNumber} 輪沒有錯題。`);
+        updateSequentialWrongSelection();
+        return;
+      }
+
+      responses = {};
+      idx = 0;
+      quizContext = {
+        startedAt: nowIso(),
+        unit: `第 ${round.roundNumber} 輪依序錯題`,
+        mode: "依序錯題複習",
+        requestedCount: qs.length,
+        userCode: activeUserCode,
+        sequential: false,
+        sourceSequentialRound: round.roundNumber
       };
 
       show("quiz");
@@ -1899,11 +2128,82 @@
       stats.lastAt = timestamp;
       profile.questionStats[key] = stats;
 
+      const expectedRoundNumber = quizContext.sequentialRoundNumber
+        || profile.sequentialRounds.length + 1;
+      const savedRoundProgress = profile.sequentialRoundProgress?.roundNumber
+        === expectedRoundNumber
+        ? profile.sequentialRoundProgress
+        : null;
+      const roundWrongIds = new Set(
+        savedRoundProgress?.wrongQuestionIds
+          || quizContext.sequentialInitialWrongIds
+          || []
+      );
+
+      if (response.isCorrect) {
+        roundWrongIds.delete(question.id);
+      } else {
+        roundWrongIds.add(question.id);
+      }
+
+      profile.sequentialRoundProgress = {
+        roundNumber: expectedRoundNumber,
+        startedAt: savedRoundProgress?.startedAt
+          || quizContext.sequentialRoundStartedAt
+          || quizContext.startedAt
+          || timestamp,
+        updatedAt: timestamp,
+        wrongQuestionIds: normalizeQuestionIds([...roundWrongIds])
+      };
+
       profile.summary.answeredCount += 1;
       profile.summary.correctCount += response.isCorrect ? 1 : 0;
       profile.summary.wrongCount += response.isCorrect ? 0 : 1;
       profile.updatedAt = timestamp;
       profile.sessions = profile.sessions.slice(-MAX_SESSION_HISTORY);
+      store.profiles[activeUserCode] = profile;
+      saveStore(store);
+      return profile;
+    }
+
+    function completeSequentialRound() {
+      if (!activeUserCode || !quizContext?.sequential) {
+        return getActiveProfile();
+      }
+
+      const store = loadStore();
+      const profile = store.profiles[activeUserCode] || createProfile(activeUserCode);
+      const timestamp = nowIso();
+      const roundProgress = profile.sequentialRoundProgress;
+      const roundNumber = roundProgress?.roundNumber
+        || quizContext.sequentialRoundNumber
+        || profile.sequentialRounds.length + 1;
+      const responseWrongIds = Object.entries(responses)
+        .filter(([, response]) => response?.confirmed && response.isCorrect === false)
+        .map(([questionId]) => Number(questionId));
+      const wrongQuestionIds = normalizeQuestionIds([
+        ...(roundProgress?.wrongQuestionIds
+          || quizContext.sequentialInitialWrongIds
+          || []),
+        ...responseWrongIds
+      ]);
+
+      if (!profile.sequentialRounds.some((round) => round.roundNumber === roundNumber)) {
+        profile.sequentialRounds.push({
+          roundNumber,
+          startedAt: roundProgress?.startedAt
+            || quizContext.sequentialRoundStartedAt
+            || quizContext.startedAt
+            || timestamp,
+          completedAt: timestamp,
+          questionCount: bank.length,
+          wrongQuestionIds
+        });
+      }
+
+      profile.sequentialRounds.sort((a, b) => a.roundNumber - b.roundNumber);
+      profile.sequentialRoundProgress = null;
+      profile.updatedAt = timestamp;
       store.profiles[activeUserCode] = profile;
       saveStore(store);
       return profile;
@@ -2025,6 +2325,7 @@
         session = savedProfile?.sessions.find(
           (item) => item.id === quizContext.sessionId
         ) || buildSessionResult();
+        savedProfile = completeSequentialRound();
         saveSequentialProgress(1);
       } else {
         session = buildSessionResult();
